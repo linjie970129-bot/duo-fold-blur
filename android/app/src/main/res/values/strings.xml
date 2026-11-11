@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">折叠渐进模糊</string>
+    <string name="wallpaper_label">折叠渐进模糊</string>
+    <string name="wallpaper_desc">开合时，外屏画面自铰链一侧渐进虚化，内屏画面渐次清晰。</string>
+</resources>
