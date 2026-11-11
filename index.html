@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0d12">
+<title>渐进式折叠模糊 · 交互原型</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#151922; --line:#242a36;
+    --txt:#eef2f8; --sub:#8b93a4; --accent:#7cc4ff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    overflow:hidden;overscroll-behavior:none}
+  #app{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:16px;gap:14px}
+
+  header{width:100%;max-width:640px;display:flex;justify-content:space-between;align-items:baseline;
+    font-size:12px;color:var(--sub);letter-spacing:.02em}
+  header b{font-size:14px;color:var(--txt);font-weight:600;letter-spacing:0}
+
+  /* 舞台：手机外框尺寸随展开进度插值 */
+  #stage{flex:1;width:100%;display:flex;align-items:center;justify-content:center;min-height:0;
+    perspective:1400px}
+  #frame{position:relative;border-radius:26px;overflow:hidden;
+    background:#05070b;border:1px solid #2b3342;
+    box-shadow:0 30px 90px rgba(0,0,0,.65),0 0 0 6px rgba(255,255,255,.025);
+    transform-style:preserve-3d;will-change:width,height,transform}
+  #screen{position:absolute;inset:0;overflow:hidden;transform-style:preserve-3d;
+    will-change:transform}
+  .wp{position:absolute;inset:0;background-repeat:no-repeat;background-position:center;
+    will-change:opacity,filter,-webkit-mask-image,mask-image}
+  /* 外屏 = 同一张壁纸的中心放大裁切（视口），内屏 = 完整全幅 */
+  #wpCover,#wpCoverBlur{background-size:175% auto}
+  #wpInner,#wpInnerBlur{background-size:100% 100%}
+  #wpCoverBlur,#wpInnerBlur{filter:blur(15px)}
+  #hinge{position:absolute;top:0;bottom:0;left:50%;width:2px;transform:translateX(-50%);
+    background:linear-gradient(to bottom,transparent,rgba(255,255,255,.55),transparent);
+    pointer-events:none}
+  #glare{position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(115deg,rgba(255,255,255,.13),transparent 42%)}
+
+  #badge{position:absolute;left:12px;top:12px;font-size:11px;color:rgba(255,255,255,.72);
+    background:rgba(8,10,16,.42);padding:5px 9px;border-radius:8px;backdrop-filter:blur(6px)}
+
+  footer{width:100%;max-width:640px;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;padding:14px 16px 16px}
+  .row{display:flex;align-items:center;gap:12px}
+  .row + .row{margin-top:12px}
+  label{font-size:12px;color:var(--sub);white-space:nowrap;min-width:56px}
+  #angle{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:4px;
+    background:linear-gradient(to right,var(--accent) 0%,var(--accent) 50%,#333b4a 50%,#333b4a 100%);
+    outline:none}
+  #angle::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+    background:#fff;border:3px solid var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+  #angle::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#fff;
+    border:3px solid var(--accent);cursor:pointer}
+  .num{font-variant-numeric:tabular-nums;font-size:13px;min-width:52px;text-align:right;color:var(--txt)}
+  button{flex:1;padding:10px 8px;border-radius:10px;border:1px solid var(--line);
+    background:#1d2330;color:var(--txt);font-size:12px;cursor:pointer;transition:background .2s}
+  button:hover{background:#283146}
+  button.on{background:var(--accent);color:#08131f;border-color:var(--accent);font-weight:600}
+  #tip{font-size:11px;color:var(--sub);line-height:1.6;margin-top:10px}
+  @media (max-height:620px){header,#tip{display:none}footer{padding:10px 12px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><b>渐进式高斯模糊 · 开合转场</b><span id="phase">展平 180°</span></header>
+
+  <div id="stage">
+    <div id="frame">
+      <div id="screen">
+        <div class="wp" id="wpInner"></div>
+        <div class="wp" id="wpInnerBlur"></div>
+        <div class="wp" id="wpCover"></div>
+        <div class="wp" id="wpCoverBlur"></div>
+        <div id="hinge"></div>
+        <div id="glare"></div>
+      </div>
+      <div id="badge">外屏 → 内屏 · 穿透式模糊</div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="row">
+      <label for="angle">铰链角度</label>
+      <input type="range" id="angle" min="0" max="180" step="1" value="180">
+      <span class="num" id="num">180°</span>
+    </div>
+    <div class="row">
+      <button id="auto">自动循环演示</button>
+      <button id="snap">合拢 / 展开</button>
+      <button id="full">全屏</button>
+    </div>
+    <div id="tip">拖动滑块逐帧跟手；展开时外屏自右向左渐进虚化、内屏自左向右渐进清晰。手机浏览器可「添加到主屏幕」当全屏应用用。</div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var $ = function(id){ return document.getElementById(id); };
+  var clamp = function(v,a,b){ return Math.max(a,Math.min(b,v)); };
+  var smooth = function(a,b,x){ var t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+
+  /* ---- 生成一张有细节的壁纸：模糊前后差异才看得出来 ---- */
+  function makeWallpaper(){
+    var c=document.createElement('canvas'); c.width=1200; c.height=900;
+    var g=c.getContext('2d');
+    var sky=g.createLinearGradient(0,0,1200,900);
+    sky.addColorStop(0,'#1b2a5e'); sky.addColorStop(.42,'#5b4a97');
+    sky.addColorStop(.72,'#d2756f'); sky.addColorStop(1,'#f2b27a');
+    g.fillStyle=sky; g.fillRect(0,0,1200,900);
+
+    var glow=g.createRadialGradient(880,250,10,880,250,430);
+    glow.addColorStop(0,'rgba(255,236,190,.75)'); glow.addColorStop(1,'rgba(255,236,190,0)');
+    g.fillStyle=glow; g.fillRect(400,0,800,700);
+
+    g.fillStyle='rgba(24,26,58,.62)';
+    g.beginPath(); g.moveTo(0,690); g.lineTo(230,470); g.lineTo(400,610);
+    g.lineTo(650,390); g.lineTo(900,640); g.lineTo(1200,500); g.lineTo(1200,900);
+    g.lineTo(0,900); g.closePath(); g.fill();
+    g.fillStyle='rgba(12,16,40,.72)';
+    g.beginPath(); g.moveTo(0,790); g.lineTo(310,640); g.lineTo(560,760);
+    g.lineTo(840,590); g.lineTo(1200,730); g.lineTo(1200,900); g.lineTo(0,900);
+    g.closePath(); g.fill();
+
+    /* 图标网格：细线条，渐进模糊时最容易看出过渡 */
+    for(var r=0;r<4;r++) for(var i=0;i<7;i++){
+      var x=95+i*150, y=120+r*145;
+      g.fillStyle='rgba(255,255,255,'+(0.13+(r+i)%3*0.05)+')';
+      var rr=18, w=92, h=92;
+      g.beginPath();
+      if(g.roundRect) g.roundRect(x,y,w,h,rr); else g.rect(x,y,w,h);
+      g.fill();
+      g.fillStyle='rgba(255,255,255,.30)';
+      g.fillRect(x+18,y+h+12,56,4);
+    }
+    g.fillStyle='rgba(255,255,255,.9)'; g.font='600 74px -apple-system,sans-serif';
+    g.fillText('9:41',80,86);
+    g.fillStyle='rgba(255,255,255,.16)';
+    g.beginPath();
+    if(g.roundRect) g.roundRect(300,790,600,86,40); else g.rect(300,790,600,86);
+    g.fill();
+    for(var k=0;k<4;k++){
+      g.fillStyle='rgba(255,255,255,.42)';
+      g.beginPath(); g.arc(390+k*140,833,26,0,Math.PI*2); g.fill();
+    }
+    return c.toDataURL('image/png');
+  }
+  var url = makeWallpaper();
+  ['wpInner','wpInnerBlur','wpCover','wpCoverBlur'].forEach(function(id){
+    $(id).style.backgroundImage='url('+url+')';
+  });
+
+  var frame=$('frame'), screen=$('screen'), hinge=$('hinge');
+  var inner=$('wpInner'), innerB=$('wpInnerBlur'),
+      cover=$('wpCover'), coverB=$('wpCoverBlur');
+  var slider=$('angle'), num=$('num'), phase=$('phase');
+
+  /* ---- 核心：把角度映射成「外屏→内屏」的穿透式渐进模糊 ---- */
+  function render(degrees){
+    var p = smooth(8,168,degrees);          // 0=合拢 1=展平
+    var s = smooth(0.08,0.94,p);            // 交叉淡化曲线
+
+    // 手机外框：竖长外屏 → 宽内屏，模拟物理开合
+    var W = 248 + (560-248)*p;
+    var H = 536 + (420-536)*p;
+    frame.style.width=W+'px'; frame.style.height=H+'px';
+    frame.style.borderRadius=(26-8*p)+'px';
+
+    // 轻微透视：合拢时略侧，展平时回正
+    var ry=(1-p)*13, sc=0.965+0.035*p;
+    screen.style.transform='rotateY('+ry.toFixed(2)+'deg) scale('+sc.toFixed(3)+')';
+
+    // 交叉淡化
+    cover.style.opacity=(1-s).toFixed(3);
+    coverB.style.opacity=(1-s).toFixed(3);
+    inner.style.opacity=s.toFixed(3);
+    innerB.style.opacity=s.toFixed(3);
+
+    // 外屏：模糊前沿自右向左推进；内屏：模糊区自左向右退去
+    var spread=clamp(p*118,0,118);
+    var coverMask='linear-gradient(to left, #000 0%, #000 '+spread.toFixed(1)+'%, transparent '+(spread+26).toFixed(1)+'%)';
+    var retreat=clamp((1-p)*118,0,118);
+    var innerMask='linear-gradient(to right, #000 0%, #000 '+retreat.toFixed(1)+'%, transparent '+(retreat+26).toFixed(1)+'%)';
+    [coverB,innerB].forEach(function(el){
+      el.style.webkitMaskImage=coverB===el?coverMask:innerMask;
+      el.style.maskImage=coverB===el?coverMask:innerMask;
+    });
+
+    // 模糊强度在中段达到峰值，两端归零，避免起止两帧糊住
+    var bell=Math.sin(Math.PI*p);
+    var blur=(4+17*bell).toFixed(1)+'px';
+    coverB.style.filter='blur('+blur+')';
+    innerB.style.filter='blur('+blur+')';
+
+    // 折痕：随展开变宽、变淡、化开
+    hinge.style.opacity=((1-p)*0.55).toFixed(3);
+    hinge.style.width=(1+7*p).toFixed(1)+'px';
+    hinge.style.filter='blur('+(p*5).toFixed(1)+'px)';
+
+    num.textContent=Math.round(degrees)+'°';
+    phase.textContent = p<0.06?'合拢 · 外屏视口':(p>0.94?'展平 · 完整内屏':'开合中 · '+Math.round(p*100)+'%');
+    var pct=(degrees/180*100).toFixed(1);
+    slider.style.background='linear-gradient(to right,var(--accent) 0%,var(--accent) '+pct+'%,#333b4a '+pct+'%,#333b4a 100%)';
+  }
+
+  var deg=180, playing=false, dir=-1, last=0, raf=0;
+  function setDeg(d){ deg=clamp(d,0,180); slider.value=Math.round(deg); render(deg); }
+  slider.addEventListener('input',function(){ playing=false; $('auto').classList.remove('on'); setDeg(+slider.value); });
+
+  function tick(t){
+    if(!playing) return;
+    if(!last) last=t;
+    var dt=Math.min(48,t-last); last=t;
+    deg += dir*dt*0.075;                 // 约 4 秒一个来回
+    if(deg<=0){ deg=0; dir=1; } else if(deg>=180){ deg=180; dir=-1; }
+    setDeg(deg);
+    raf=requestAnimationFrame(tick);
+  }
+  $('auto').addEventListener('click',function(){
+    playing=!playing; this.classList.toggle('on',playing);
+    if(playing){ last=0; raf=requestAnimationFrame(tick); } else cancelAnimationFrame(raf);
+  });
+  $('snap').addEventListener('click',function(){
+    playing=false; $('auto').classList.remove('on'); cancelAnimationFrame(raf);
+    setDeg(deg>90?0:180);
+  });
+  $('full').addEventListener('click',function(){
+    var el=document.documentElement;
+    if(!document.fullscreenElement){ (el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el); }
+    else { (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document); }
+  });
+  window.addEventListener('keydown',function(e){
+    if(e.key==='ArrowLeft') setDeg(deg-5);
+    if(e.key==='ArrowRight') setDeg(deg+5);
+  });
+
+  render(deg);
+})();
+</script>
+</body>
+</html>
