@@ -12,11 +12,11 @@ import android.view.SurfaceHolder
  */
 class FoldBlurWallpaperService : WallpaperService() {
 
+    companion object { private const val TAG = "FoldBlur" }
+
     override fun onCreateEngine(): Engine = DuoEngine()
 
     inner class DuoEngine : Engine() {
-
-        companion object { private const val TAG = "FoldBlur" }
 
         private lateinit var source: FoldAngleSource
         private val renderer = DuoBlurRenderer()
